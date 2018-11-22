@@ -314,6 +314,45 @@ class MrpcProcessor(DataProcessor):
     return examples
 
 
+class BingProcessor(DataProcessor):
+  """Processor for the BING data set."""
+
+  def get_train_examples(self, data_dir):
+    """See base class."""
+    return self._create_examples(
+        self._read_tsv(os.path.join(data_dir, "QE_topic_url_2018_10_10_title_train.txt")), "train")
+  def get_train_examples_fake(self, data_dir):
+    with open(os.path.join(data_dir, "QE_topic_url_2018_10_10_title_train.txt"), encoding="utf-8") as f:
+      for i, l in enumerate(f):
+        pass
+    return [0] * (i+1)
+  def get_dev_examples(self, data_dir):
+    """See base class."""
+    return self._create_examples(
+        self._read_tsv(os.path.join(data_dir, "QE_topic_url_2018_10_10_title_test.txt")), "dev")
+
+  def get_test_examples(self, data_dir):
+    """See base class."""
+    return self._create_examples(
+        self._read_tsv(os.path.join(data_dir, "QE_topic_url_2018_10_10_title_test.txt")), "test")
+
+  def get_labels(self):
+    """See base class."""
+    return [str(i) for i in range(8739)]
+
+  def _create_examples(self, lines, set_type):
+    """Creates examples for the training and dev sets."""
+    examples = []
+    for line in lines:
+      guid = line[0] #"%s-%s" % (set_type, i)
+      text_a = tokenization.convert_to_unicode(line[1])
+      #text_b = tokenization.convert_to_unicode(line[4])
+      label = tokenization.convert_to_unicode(line[3])
+      examples.append(
+          InputExample(guid=guid, text_a=text_a, text_b=None, label=label))
+    return examples
+
+
 class ColaProcessor(DataProcessor):
   """Processor for the CoLA data set (GLUE version)."""
 
@@ -746,6 +785,7 @@ def main(_):
       "mnli": MnliProcessor,
       "mrpc": MrpcProcessor,
       "xnli": XnliProcessor,
+      "bing": BingProcessor,
   }
 
   if not FLAGS.do_train and not FLAGS.do_eval and not FLAGS.do_predict:
@@ -794,7 +834,11 @@ def main(_):
   num_train_steps = None
   num_warmup_steps = None
   if FLAGS.do_train:
-    train_examples = processor.get_train_examples(FLAGS.data_dir)
+    train_file = os.path.join(FLAGS.output_dir, "train.tf_record")
+    if (os.path.isfile(train_file)):
+      train_examples = processor.get_train_examples_fake(FLAGS.data_dir)
+    else:
+      train_examples = processor.get_train_examples(FLAGS.data_dir)
     num_train_steps = int(
         len(train_examples) / FLAGS.train_batch_size * FLAGS.num_train_epochs)
     num_warmup_steps = int(num_train_steps * FLAGS.warmup_proportion)
@@ -821,8 +865,9 @@ def main(_):
 
   if FLAGS.do_train:
     train_file = os.path.join(FLAGS.output_dir, "train.tf_record")
-    file_based_convert_examples_to_features(
-        train_examples, label_list, FLAGS.max_seq_length, tokenizer, train_file)
+    if (not os.path.isfile(train_file)):
+        file_based_convert_examples_to_features(
+            train_examples, label_list, FLAGS.max_seq_length, tokenizer, train_file)
     tf.logging.info("***** Running training *****")
     tf.logging.info("  Num examples = %d", len(train_examples))
     tf.logging.info("  Batch size = %d", FLAGS.train_batch_size)
