@@ -67,6 +67,11 @@ flags.DEFINE_integer(
     "Sequences longer than this will be truncated, and sequences shorter "
     "than this will be padded.")
 
+flags.DEFINE_integer(
+    "truncated_seq_length", 32,
+    "The sequence length used while training. "
+    "Input sequences longer than this will be truncated.")
+
 flags.DEFINE_bool("do_train", False, "Whether to run training.")
 
 flags.DEFINE_bool("do_eval", False, "Whether to run eval on the dev set.")
@@ -334,7 +339,7 @@ class BingProcessor(DataProcessor):
   def get_test_examples(self, data_dir):
     """See base class."""
     return self._create_examples(
-        self._read_tsv(os.path.join(data_dir, "QE_topic_url_2018_10_10_title_test.txt")), "test")
+        self._read_tsv(os.path.join(data_dir, "SampleResult2.tsv")), "test")
 
   def get_labels(self):
     """See base class."""
@@ -348,7 +353,11 @@ class BingProcessor(DataProcessor):
       text_a = tokenization.convert_to_unicode(line[1])
       #text_b = tokenization.convert_to_unicode(line[4])
       label = tokenization.convert_to_unicode(line[3])
-      examples.append(
+      if (set_type == "test"):
+        examples.append(
+          InputExample(guid=guid, text_a=line[5], text_b=None, label='0'))
+      else:
+        examples.append(
           InputExample(guid=guid, text_a=text_a, text_b=None, label=label))
     return examples
 
@@ -624,7 +633,7 @@ def create_model(bert_config, is_training, input_ids, input_mask, segment_ids,
 
 def model_fn_builder(bert_config, num_labels, init_checkpoint, learning_rate,
                      num_train_steps, num_warmup_steps, use_tpu,
-                     use_one_hot_embeddings):
+                     use_one_hot_embeddings, truncated_seq_length):
   """Returns `model_fn` closure for TPUEstimator."""
 
   def model_fn(features, labels, mode, params):  # pylint: disable=unused-argument
@@ -634,9 +643,9 @@ def model_fn_builder(bert_config, num_labels, init_checkpoint, learning_rate,
     for name in sorted(features.keys()):
       tf.logging.info("  name = %s, shape = %s" % (name, features[name].shape))
 
-    input_ids = features["input_ids"]
-    input_mask = features["input_mask"]
-    segment_ids = features["segment_ids"]
+    input_ids = tf.slice(features["input_ids"], [0,0],[-1,truncated_seq_length])
+    input_mask = tf.slice(features["input_mask"], [0,0],[-1,truncated_seq_length])
+    segment_ids = tf.slice(features["segment_ids"], [0,0],[-1,truncated_seq_length])
     label_ids = features["label_ids"]
 
     is_training = (mode == tf.estimator.ModeKeys.TRAIN)
@@ -851,7 +860,8 @@ def main(_):
       num_train_steps=num_train_steps,
       num_warmup_steps=num_warmup_steps,
       use_tpu=FLAGS.use_tpu,
-      use_one_hot_embeddings=FLAGS.use_tpu)
+      use_one_hot_embeddings=FLAGS.use_tpu,
+      truncated_seq_length=FLAGS.truncated_seq_length)
 
   # If TPU is not available, this will fall back to normal Estimator on CPU
   # or GPU.
@@ -917,9 +927,10 @@ def main(_):
   if FLAGS.do_predict:
     predict_examples = processor.get_test_examples(FLAGS.data_dir)
     predict_file = os.path.join(FLAGS.output_dir, "predict.tf_record")
-    file_based_convert_examples_to_features(predict_examples, label_list,
-                                            FLAGS.max_seq_length, tokenizer,
-                                            predict_file)
+    if (not os.path.isfile(predict_file)):
+      file_based_convert_examples_to_features(predict_examples, label_list,
+                                              FLAGS.max_seq_length, tokenizer,
+                                              predict_file)
 
     tf.logging.info("***** Running prediction*****")
     tf.logging.info("  Num examples = %d", len(predict_examples))
